@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"> <!-- Added user-scalable=no -->
+    <title>GeoSize Compare Pro</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <style>
+        :root {
+            --theme-primary: #1c2733; /* Slightly deeper base */
+            --theme-primary-hover: #283847; 
+            --theme-accent: #007aff; 
+            --theme-accent-hover: #005ecb;
+            --theme-light-bg: #f0f2f5; /* Lighter page bg */
+            --theme-component-bg: #ffffff;
+            --theme-text-light: #ffffff;
+            --theme-text-dark: #1d1d1f; 
+            --theme-border-light: #d8dde3; 
+            --theme-danger: #ff3b30; 
+            --theme-danger-hover: #d92c20;
+
+            --border-radius-pill: 30px;
+            --border-radius-soft: 8px; 
+            --bottom-bar-height: 65px; /* Slightly reduced */
+            --mobile-bottom-bar-height: auto; 
+            --transition-speed: 0.2s;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--theme-light-bg);
+            color: var(--theme-text-dark);
+            overflow: hidden;
+            -webkit-tap-highlight-color: transparent; /* Prevent tap highlight on mobile */
+        }
+
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: var(--theme-primary);
+            z-index: 10000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            opacity: 1; transition: opacity 0.3s ease-out 0.5s; 
+        }
+        .map-view-wrapper { 
+            opacity: 0; transition: opacity 0.4s ease-in 0.3s; 
+            width:100%; height:100%; position: relative; /* For creator text */
+        }
+        .map-view-wrapper.visible { opacity: 1; }
+
+        .loader-text { font-size: 18px; font-weight: 500; color: var(--theme-text-light); margin-bottom: 20px; letter-spacing: 0.2px; text-align: center; padding: 0 20px; }
+        .progress-bar-container { width: 45%; max-width: 250px; height: 5px; background-color: rgba(255,255,255,0.1); border-radius: var(--border-radius-pill); overflow: hidden; }
+        .progress-bar { width: 0%; height: 100%; background-color: var(--theme-accent); border-radius: var(--border-radius-pill); transition: width var(--transition-speed) ease-in-out; }
+
+        .map-view { width: 100%; /* Height set by JS */ }
+        .map-container { width: 100%; height: 100%; background-color: #e0e8f0; } 
+        
+        .creator-credit {
+            position: absolute;
+            bottom: 5px; /* Above scale control */
+            right: 5px;
+            font-size: 9px;
+            color: #555;
+            background-color: rgba(255,255,255,0.6);
+            padding: 1px 4px;
+            border-radius: 2px;
+            z-index: 800; /* Below Leaflet controls but above map tiles */
+        }
+        .map-view.hidden .creator-credit { display: none; }
+
+
+        .bottom-controls-container {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background-color: var(--theme-component-bg);
+            border-top: 1px solid var(--theme-border-light);
+            padding: 10px 0; 
+            z-index: 1000; min-height: var(--bottom-bar-height);
+            box-sizing: border-box; box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+        }
+
+        .controls-inner { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 0 10px; flex-wrap: wrap; height: 100%; }
+
+        .controls-inner button, .controls-inner select {
+            padding: 8px 16px; border: none; border-radius: var(--border-radius-soft); 
+            font-weight: 500; cursor: pointer; transition: all var(--transition-speed) ease;
+            font-size: 13px; outline: none; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .controls-inner button.pill-button { border-radius: var(--border-radius-pill); padding: 8px 20px;}
+        .controls-inner button.primary, .controls-inner button:not(.secondary):not(.danger):not(.accent):not(.active-tool) { background-color: var(--theme-primary); color: var(--theme-text-light); }
+        .controls-inner button.primary:hover, .controls-inner button:not(.secondary):not(.danger):not(.accent):not(.active-tool):hover { background-color: var(--theme-primary-hover); box-shadow: 0 2px 5px rgba(30, 42, 56, 0.2); transform: translateY(-1px); }
+        .controls-inner button.secondary, .controls-inner select { background-color: var(--theme-component-bg); color: var(--theme-primary); border: 1px solid var(--theme-border-light); }
+        .controls-inner button.secondary:hover, .controls-inner select:hover { border-color: var(--theme-primary); color: var(--theme-primary-hover); box-shadow: 0 2px 5px rgba(0,0,0,0.07); transform: translateY(-1px); }
+        .controls-inner select {
+            -webkit-appearance: none; -moz-appearance: none; appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231c2733' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat; background-position: right 8px center; background-size: 0.75em; padding-right: 28px;
+        }
+        .controls-inner button:active { transform: translateY(0px); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .controls-inner button:disabled { background-color: #e9edf0 !important; color: #a0aab5 !important; cursor: not-allowed; border-color: var(--theme-border-light) !important; box-shadow: none !important; transform: none !important; }
+        .controls-inner button.danger { background-color: var(--theme-danger); color: var(--theme-text-light); border:none; }
+        .controls-inner button.danger:hover { background-color: var(--theme-danger-hover); box-shadow: 0 2px 5px rgba(231, 76, 60, 0.2); transform: translateY(-1px); }
+        .controls-inner button.accent { background-color: var(--theme-component-bg); color: var(--theme-accent); border: 1px solid var(--theme-border-light); padding: 6px; width: 36px; height: 36px; }
+        .controls-inner button.accent.locked { background-color: var(--theme-accent); border-color: var(--theme-accent); }
+        .controls-inner button.accent:hover { border-color: var(--theme-accent); box-shadow: 0 2px 5px rgba(0, 122, 255, 0.12); transform: translateY(-1px); }
+        .controls-inner button.accent.locked:hover { background-color: var(--theme-accent-hover); border-color: var(--theme-accent-hover); }
+        .controls-inner button.active-tool { background-color: var(--theme-accent); color: var(--theme-text-light); border: none;}
+        .controls-inner button.active-tool:hover { background-color: var(--theme-accent-hover); }
+
+        .lock-icon svg { width: 17px; height: 17px; stroke-width: 2.2; transition: all var(--transition-speed) ease; }
+        .lock-icon .lock-shackle { transition: d var(--transition-speed) ease-in-out; }
+        button.accent.locked .lock-icon svg { stroke: var(--theme-text-light); }
+        button.accent .lock-icon svg { stroke: var(--theme-accent); }
+        
+        .hidden { display: none !important; }
+
+        .custom-map-pin { background-color: var(--theme-primary); border-radius: 50%; border: 1.5px solid var(--theme-component-bg); box-shadow: 0 1px 3px rgba(0,0,0,0.2); width: 8px; height: 8px; transition: all var(--transition-speed) ease; }
+        .custom-map-pin.dragging, .custom-map-pin:hover { transform: scale(1.7); background-color: var(--theme-accent); }
+        .custom-map-pin.first-marker { background-color: var(--theme-danger); width: 10px; height: 10px; }
+        .custom-map-pin.first-marker:hover { background-color: var(--theme-danger-hover); }
+        .ruler-pin { background-color: var(--theme-accent); border-radius: 50%; border: 1.5px solid var(--theme-component-bg); box-shadow: 0 1px 3px rgba(0,0,0,0.2); width: 7px; height: 7px; }
+        
+        .segment-length-tooltip, .ruler-total-tooltip {
+            background-color: rgba(255, 255, 255, 0.88); border: 1px solid var(--theme-border-light);
+            border-radius: var(--border-radius-soft); color: var(--theme-text-dark);
+            padding: 3px 6px; font-size: 11px; white-space: nowrap;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .ruler-total-tooltip { font-weight: 500; }
+
+        .leaflet-control-scale-line { border: 1px solid #888 !important; background: rgba(255, 255, 255, 0.75) !important; color: #222 !important; font-size: 10px !important; padding: 2px 5px !important; border-radius: 3px;}
+
+        @media (max-width: 768px) {
+            .map-view { /* Height set by JS */ }
+            .bottom-controls-container { min-height: var(--mobile-bottom-bar-height); padding: 8px 0; }
+            .controls-inner { gap: 6px; flex-wrap: wrap; justify-content: space-evenly; }
+            .controls-inner button, .controls-inner select { padding: 8px 12px; font-size: 12.5px; flex-grow: 0; flex-basis: auto; } 
+            .controls-inner button.pill-button { flex-basis: auto; }
+            .controls-inner button.accent { width: 34px; height: 34px; flex-basis: auto;}
+            .lock-icon svg {width: 16px; height: 16px;}
+        }
+         @media (max-width: 480px) { 
+             .controls-inner button, .controls-inner select { flex-basis: calc(50% - 6px); font-size: 12px; padding: 8px 10px; }
+             .controls-inner button.pill-button { flex-basis: calc(50% - 6px); }
+         }
+    </style>
+</head>
+<body>
+    <div id="map-view-wrapper"> 
+        <div id="map1-view" class="map-view"> 
+            <div id="map1" class="map-container"></div>
+            <div class="creator-credit">Created by Constantin Jäckel</div>
+        </div>
+        <div id="map2-view" class="map-view hidden"> 
+            <div id="map2" class="map-container"></div>
+            <div class="creator-credit">Created by Constantin Jäckel</div>
+        </div>
+    </div>
+
+    <div id="loading-overlay">
+        <div id="loader-message" class="loader-text">Loading Maps...</div>
+        <div class="progress-bar-container"><div id="progress-bar" class="progress-bar"></div></div>
+    </div>
+
+    <div class="bottom-controls-container">
+        <div id="map1-controls" class="controls-inner">
+            <button id="ruler-tool-map1" class="secondary" title="Measure distances">📏</button>
+            <button id="toggle-lengths" class="secondary" title="Show/Hide Lengths">👁️</button>
+            <button id="clear-drawing" class="danger pill-button">Clear</button>
+            <button id="confirm-shape" class="primary pill-button" disabled>Compare</button>
+            <select id="tile-layer-select1">
+                <option value="osm">Street</option> <option value="satellite">Satellite</option> <option value="hybrid">Hybrid</option>
+                <option value="topo">Topo</option> <option value="hot">Humanitarian</option> <option value="dark">Dark Mode</option>
+            </select>
+        </div>
+        <div id="map2-controls" class="controls-inner hidden">
+            <button id="ruler-tool-map2" class="secondary" title="Measure distances">📏</button>
+            <button id="back-to-drawing" class="secondary pill-button">New Shape</button>
+            <button id="lock-polygon" class="accent" title="Lock/Unlock polygon position">
+                <span class="lock-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path class="lock-shackle" d="M7 11V7a5 5 0 0 1 9.9-1"></path> 
+                    </svg>
+                </span>
+            </button>
+            <select id="tile-layer-select2">
+                <option value="osm">Street</option> <option value="satellite">Satellite</option> <option value="hybrid">Hybrid</option>
+                <option value="topo">Topo</option> <option value="hot">Humanitarian</option> <option value="dark">Dark Mode</option>
+            </select>
+        </div>
+    </div>
+
+<script>
+    // --- Constants & Global Vars ---
+    let map1, map2;
+    let drawnPoints = []; let drawnMarkers = []; let drawnPolyline = null; let segmentLengthTooltips = [];
+    let isShapeClosed = false; let showSegmentLengths = true; // New state for toggling lengths
+    let confirmedShapeOffsets = []; let confirmedShapeOriginalCentroid = null; 
+    let comparisonPolygon = null;
+    let isComparisonPolygonLocked = false; let lockedComparisonCentroid = null;
+
+    let isRulerModeActive = false; let activeRulerMap = null;
+    let rulerPoints = []; let rulerMarkers = []; let rulerPolyline = null; let rulerTotalLengthTooltip = null;
+
+    const osmTileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'; const osmAttrib = '© OSM';
+    const esriSatelliteUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'; 
+    const esriSatelliteAttrib = '© Esri & Community';
+    const esriBoundariesUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+    const esriBoundariesAttrib = ''; 
+    const esriTopoUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}';
+    const esriTopoAttrib = '© Esri & Community';
+    const osmHotUrl = 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'; const osmHotAttrib = '© OSM & HOT';
+    const cartoDarkUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'; const cartoDarkAttrib = '© CartoDB & OSM';
+
+    let currentTileLayer1, currentTileLayer2, currentHybridOverlay1, currentHybridOverlay2;
+    const progressBar = document.getElementById('progress-bar');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loaderMessage = document.getElementById('loader-message');
+    const mapViewWrapper = document.getElementById('map-view-wrapper');
+    const lockButton = document.getElementById('lock-polygon');
+    const lockIconShackle = lockButton.querySelector('.lock-shackle');
+    const rulerButtonMap1 = document.getElementById('ruler-tool-map1');
+    const rulerButtonMap2 = document.getElementById('ruler-tool-map2');
+    const toggleLengthsButton = document.getElementById('toggle-lengths');
+
+    // --- Loading Screen ---
+    const loadingMessages = ["Calibrating Geocoders...", "Aligning Satellites...", "Plotting Coordinates...", "Finalizing Map Matrix..."];
+    let loadingMsgIndex = 0;
+    function updateLoaderMessage() {
+        loaderMessage.textContent = loadingMessages[loadingMsgIndex];
+        loadingMsgIndex = (loadingMsgIndex + 1) % loadingMessages.length;
+    }
+    updateLoaderMessage(); // Initial message
+    const loaderInterval = setInterval(updateLoaderMessage, 800); // Change message periodically
+
+    // --- Map & UI Functions ---
+    function setMapViewHeight() {
+        const bottomBar = document.querySelector('.bottom-controls-container');
+        const barHeight = bottomBar ? bottomBar.offsetHeight : parseInt(getComputedStyle(document.documentElement).getPropertyValue('--bottom-bar-height'));
+        const mapViews = document.querySelectorAll('.map-view');
+        mapViews.forEach(mv => mv.style.height = `calc(100vh - ${barHeight}px)`);
+        if (map1) map1.invalidateSize({debounceMoveend: true});
+        if (map2) map2.invalidateSize({debounceMoveend: true});
+    }
+    window.addEventListener('resize', setMapViewHeight);
+    window.addEventListener('orientationchange', setMapViewHeight);
+
+
+    function createTileLayer(type, mapInstance) {
+        let baseLayer, overlayLayer;
+        let currentMainLayer = (mapInstance === map1) ? currentTileLayer1 : currentTileLayer2;
+        let currentOverlay = (mapInstance === map1) ? currentHybridOverlay1 : currentHybridOverlay2;
+
+        if (currentMainLayer && mapInstance.hasLayer(currentMainLayer)) mapInstance.removeLayer(currentMainLayer);
+        if (currentOverlay && mapInstance.hasLayer(currentOverlay)) mapInstance.removeLayer(currentOverlay);
+        
+        if (mapInstance === map1) { currentTileLayer1 = null; currentHybridOverlay1 = null; }
+        else { currentTileLayer2 = null; currentHybridOverlay2 = null; }
+
+
+        switch(type) {
+            case 'satellite': baseLayer = L.tileLayer(esriSatelliteUrl, { attribution: esriSatelliteAttrib, maxZoom: 19, detectRetina: true }); break;
+            case 'hybrid':
+                baseLayer = L.tileLayer(esriSatelliteUrl, { attribution: esriSatelliteAttrib, maxZoom: 19, detectRetina: true });
+                overlayLayer = L.tileLayer(esriBoundariesUrl, { attribution: esriBoundariesAttrib, maxZoom: 19, pane: 'overlayPane', detectRetina: true });
+                if (mapInstance === map1) currentHybridOverlay1 = overlayLayer; else currentHybridOverlay2 = overlayLayer;
+                break;
+            case 'topo': baseLayer = L.tileLayer(esriTopoUrl, { attribution: esriTopoAttrib, maxZoom: 19, detectRetina: true }); break;
+            case 'hot': baseLayer = L.tileLayer(osmHotUrl, { attribution: osmHotAttrib, maxZoom: 19, detectRetina: true }); break;
+            case 'dark': baseLayer = L.tileLayer(cartoDarkUrl, { attribution: cartoDarkAttrib, maxZoom: 19, detectRetina: true }); break;
+            default: baseLayer = L.tileLayer(osmTileUrl, { attribution: osmAttrib, maxZoom: 19, detectRetina: true }); break;
+        }
+        
+        baseLayer.addTo(mapInstance);
+        if (overlayLayer) overlayLayer.addTo(mapInstance);
+        
+        if (mapInstance === map1) currentTileLayer1 = baseLayer; else currentTileLayer2 = baseLayer;
+    }
+
+    function createCustomPinIcon(isFirst = false) { return L.divIcon({ className: 'custom-map-pin' + (isFirst ? ' first-marker' : ''), iconSize: isFirst ? [10,10]:[8,8], iconAnchor: isFirst ? [5,5]:[4,4] }); }
+    function createRulerPinIcon() { return L.divIcon({ className: 'ruler-pin', iconSize: [7,7], iconAnchor: [3,3] }); }
+    function formatDistance(meters) {
+        if (meters > 10000) return (meters / 1000).toFixed(1) + ' km'; 
+        if (meters > 1000) return (meters / 1000).toFixed(2) + ' km';
+        return Math.round(meters) + ' m';
+    }
+
+    function displaySegmentLengths() {
+        segmentLengthTooltips.forEach(tooltip => { if (map1.hasLayer(tooltip)) map1.removeLayer(tooltip); });
+        segmentLengthTooltips = [];
+        if (!showSegmentLengths || drawnPoints.length < 2 || !drawnPolyline) return;
+
+        let pointsToUse = [...drawnPoints];
+        if (isShapeClosed && drawnPoints.length > 0) pointsToUse.push(drawnPoints[0]);
+
+        for (let i = 0; i < pointsToUse.length - 1; i++) {
+            const p1 = pointsToUse[i]; const p2 = pointsToUse[i+1];
+            const distance = p1.distanceTo(p2);
+            const midPoint = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2);
+            const tooltip = L.tooltip({permanent: true, direction: 'center', className: 'segment-length-tooltip', opacity: 0.9, offset: L.point(0,-7)})
+                             .setLatLng(midPoint).setContent(formatDistance(distance)).addTo(map1);
+            segmentLengthTooltips.push(tooltip);
+        }
+    }
+    
+    function updateDrawnPolyline() {
+        if (drawnPolyline && map1.hasLayer(drawnPolyline)) map1.removeLayer(drawnPolyline);
+        displaySegmentLengths(); // Call this first to clear existing, then it re-evaluates based on showSegmentLengths
+
+        if (drawnPoints.length > 1) {
+            let polylinePoints = [...drawnPoints];
+            if (isShapeClosed && drawnPoints.length > 0) polylinePoints.push(drawnPoints[0]);
+            drawnPolyline = L.polyline(polylinePoints, { color: 'var(--theme-accent)', weight: 3, opacity: 0.8 }).addTo(map1);
+            if(showSegmentLengths) displaySegmentLengths(); // Re-display if toggled on
+        }
+        document.getElementById('confirm-shape').disabled = isRulerModeActive || drawnPoints.length < 3 || !isShapeClosed;
+    }
+    
+    function showLoadingProgress(percentage) { progressBar.style.width = percentage + '%'; }
+
+    function initMap1() {
+        setMapViewHeight(); // Set height before map init
+        showLoadingProgress(20);
+        map1 = L.map('map1', { zoomControl: true, attributionControl: false }).setView([20, 0], 2);
+        L.control.scale({imperial: false, metric: true, position: 'bottomleft'}).addTo(map1);
+        L.control.attribution({prefix: false, position: 'bottomright'}).addTo(map1);
+        showLoadingProgress(40);
+        createTileLayer('osm', map1); // Assign to currentTileLayer1 within function
+        
+        map1.whenReady(() => {
+            showLoadingProgress(100);
+            clearInterval(loaderInterval); // Stop changing messages
+            setTimeout(() => { loadingOverlay.style.opacity = '0'; mapViewWrapper.classList.add('visible'); }, 1200); 
+            setTimeout(() => { loadingOverlay.style.display = 'none'; }, 1600); 
+        });
+        map1.on('click', (e) => handleMapClick(e, map1));
+    }
+
+    function handleMapClick(e, mapInstance) {
+        if (isRulerModeActive && activeRulerMap === mapInstance) {
+            const latlng = e.latlng; rulerPoints.push(latlng);
+            rulerMarkers.push(L.marker(latlng, { icon: createRulerPinIcon() }).addTo(mapInstance));
+            if (rulerPolyline && mapInstance.hasLayer(rulerPolyline)) mapInstance.removeLayer(rulerPolyline);
+            if (rulerPoints.length > 1) rulerPolyline = L.polyline(rulerPoints, { color: '#ff8c00', weight: 2.5, dashArray: '6, 6', opacity: 0.9 }).addTo(mapInstance);
+            let totalDist = 0;
+            for(let i=0; i < rulerPoints.length - 1; i++) totalDist += rulerPoints[i].distanceTo(rulerPoints[i+1]);
+            if (rulerTotalLengthTooltip && mapInstance.hasLayer(rulerTotalLengthTooltip)) mapInstance.removeLayer(rulerTotalLengthTooltip);
+            if (rulerPoints.length > 0) {
+                rulerTotalLengthTooltip = L.tooltip({permanent: true, direction: 'top', className: 'ruler-total-tooltip', opacity:0.95, offset: L.point(0,-10)})
+                                         .setLatLng(latlng).setContent('Total: ' + formatDistance(totalDist)).addTo(mapInstance);
+            }
+        } else if (!isRulerModeActive && mapInstance === map1) { 
+            if (isShapeClosed) return;
+            const latlng = e.latlng; drawnPoints.push(latlng);
+            const isFirstMarker = drawnMarkers.length === 0;
+            const marker = L.marker(latlng, { icon: createCustomPinIcon(isFirstMarker), draggable: true }).addTo(map1);
+            marker.on('dragstart', () => marker.getElement().classList.add('dragging'));
+            marker.on('dragend', function() {
+                marker.getElement().classList.remove('dragging');
+                const markerIndex = drawnMarkers.indexOf(this);
+                if (markerIndex !== -1) { drawnPoints[markerIndex] = this.getLatLng(); updateDrawnPolyline(); }
+            });
+            marker.on('click', function(ev) {
+                L.DomEvent.stopPropagation(ev);
+                if (drawnMarkers.indexOf(this) === 0 && drawnPoints.length >= 3 && !isShapeClosed) {
+                    isShapeClosed = true; updateDrawnPolyline();
+                    drawnMarkers.forEach(m => m.closePopup().unbindPopup().bindPopup('Shape Closed'));
+                    drawnMarkers[0].openPopup();
+                }
+            });
+            drawnMarkers.push(marker); updateDrawnPolyline();
+        }
+    }
+    
+    function clearRulerDrawing(mapInstance) {
+        if (!mapInstance) return;
+        rulerMarkers.forEach(m => { if (mapInstance.hasLayer(m)) mapInstance.removeLayer(m); });
+        if (rulerPolyline && mapInstance.hasLayer(rulerPolyline)) mapInstance.removeLayer(rulerPolyline);
+        if (rulerTotalLengthTooltip && mapInstance.hasLayer(rulerTotalLengthTooltip)) mapInstance.removeLayer(rulerTotalLengthTooltip);
+        rulerPolyline = null; rulerTotalLengthTooltip = null; rulerPoints = []; rulerMarkers = [];
+    }
+
+    function toggleRulerMode(mapInstance, buttonElement) {
+        const otherMapInstance = mapInstance === map1 ? map2 : map1;
+        const otherButtonElement = mapInstance === map1 ? rulerButtonMap2 : rulerButtonMap1;
+        if (isRulerModeActive && activeRulerMap === otherMapInstance) { clearRulerDrawing(otherMapInstance); if(otherButtonElement) otherButtonElement.classList.remove('active-tool'); }
+        isRulerModeActive = activeRulerMap === mapInstance ? !isRulerModeActive : true; 
+        activeRulerMap = isRulerModeActive ? mapInstance : null;
+        buttonElement.classList.toggle('active-tool', isRulerModeActive && activeRulerMap === mapInstance);
+        if(otherButtonElement) otherButtonElement.classList.remove('active-tool'); 
+        if (!isRulerModeActive || activeRulerMap !== mapInstance) clearRulerDrawing(mapInstance);
+        document.getElementById('confirm-shape').disabled = isRulerModeActive || drawnPoints.length < 3 || !isShapeClosed;
+        if(mapInstance === map1) toggleLengthsButton.disabled = isRulerModeActive; // Disable length toggle in ruler mode
+    }
+
+    rulerButtonMap1.addEventListener('click', () => toggleRulerMode(map1, rulerButtonMap1));
+    rulerButtonMap2.addEventListener('click', () => toggleRulerMode(map2, rulerButtonMap2));
+    
+    toggleLengthsButton.addEventListener('click', () => {
+        showSegmentLengths = !showSegmentLengths;
+        toggleLengthsButton.classList.toggle('active-tool', showSegmentLengths);
+        toggleLengthsButton.title = showSegmentLengths ? "Hide Lengths" : "Show Lengths";
+        updateDrawnPolyline();
+    });
+
+    document.getElementById('clear-drawing').addEventListener('click', () => {
+        drawnMarkers.forEach(m => { if (map1.hasLayer(m)) map1.removeLayer(m); });
+        if (drawnPolyline && map1.hasLayer(drawnPolyline)) map1.removeLayer(drawnPolyline);
+        segmentLengthTooltips.forEach(tooltip => { if (map1.hasLayer(tooltip)) map1.removeLayer(tooltip); });
+        segmentLengthTooltips = []; drawnPolyline = null; drawnPoints = []; drawnMarkers = []; isShapeClosed = false;
+        document.getElementById('confirm-shape').disabled = true;
+        if(isRulerModeActive && activeRulerMap === map1) { clearRulerDrawing(map1); isRulerModeActive = false; activeRulerMap = null; rulerButtonMap1.classList.remove('active-tool'); toggleLengthsButton.disabled = false;}
+    });
+
+    document.getElementById('confirm-shape').addEventListener('click', () => {
+        if (drawnPoints.length < 3 || !isShapeClosed) { alert("Draw & close a shape (min 3 points)."); return; }
+        confirmedShapeOriginalCentroid = L.polygon(drawnPoints).getBounds().getCenter();
+        confirmedShapeOffsets = drawnPoints.map(p => ({ lat: p.lat - confirmedShapeOriginalCentroid.lat, lng: p.lng - confirmedShapeOriginalCentroid.lng }));
+        lockedComparisonCentroid = null; 
+        document.getElementById('map1-view').classList.add('hidden'); document.getElementById('map1-controls').classList.add('hidden');
+        document.getElementById('map2-view').classList.remove('hidden'); document.getElementById('map2-controls').classList.remove('hidden');
+        if (!map2) initMap2();
+        else { map2.invalidateSize(); map2.setView(confirmedShapeOriginalCentroid, map1.getZoom()); updateComparisonPolygonView(); }
+        isComparisonPolygonLocked = false; lockButton.classList.remove('locked');
+        lockIconShackle.setAttribute('d', 'M7 11V7a5 5 0 0 1 9.9-1'); 
+        if(isRulerModeActive && activeRulerMap === map1) { clearRulerDrawing(map1); isRulerModeActive = false; activeRulerMap = null; rulerButtonMap1.classList.remove('active-tool'); toggleLengthsButton.disabled = false;}
+    });
+
+    document.getElementById('tile-layer-select1').addEventListener('change', e => createTileLayer(e.target.value, map1));
+
+    function initMap2() {
+        setMapViewHeight(); // Ensure height is set for map2 as well
+        map2 = L.map('map2', { zoomControl: true, attributionControl: false }).setView(confirmedShapeOriginalCentroid || [20,0], map1 ? map1.getZoom() : 2);
+        L.control.scale({imperial: false, metric: true, position: 'bottomleft'}).addTo(map2);
+        L.control.attribution({prefix: false, position: 'bottomright'}).addTo(map2);
+        createTileLayer('osm', map2); // Assign to currentTileLayer2
+        map2.on('click', (e) => handleMapClick(e, map2));
+        map2.on('moveend zoomend', () => { if (!isComparisonPolygonLocked) lockedComparisonCentroid = null; updateComparisonPolygonView(); });
+        updateComparisonPolygonView(); 
+    }
+
+    function updateComparisonPolygonView() {
+        if (!map2 || confirmedShapeOffsets.length === 0) return;
+        let targetCentroid = (isComparisonPolygonLocked && lockedComparisonCentroid) ? lockedComparisonCentroid : map2.getCenter();
+        const comparisonLatLngs = confirmedShapeOffsets.map(offset => L.latLng(targetCentroid.lat + offset.lat, targetCentroid.lng + offset.lng));
+        if (comparisonPolygon) comparisonPolygon.setLatLngs(comparisonLatLngs);
+        else comparisonPolygon = L.polygon(comparisonLatLngs, { color: 'var(--theme-accent)', fillColor: 'var(--theme-accent)', fillOpacity: 0.3, weight: 2 }).addTo(map2);
+    }
+    
+    lockButton.addEventListener('click', function() {
+        isComparisonPolygonLocked = !isComparisonPolygonLocked;
+        this.classList.toggle('locked', isComparisonPolygonLocked);
+        if (isComparisonPolygonLocked) {
+            lockIconShackle.setAttribute('d', 'M7 11V7.5C7 5.01472 9.01472 3 11.5 3C13.9853 3 16 5.01472 16 7.5V11'); 
+            lockedComparisonCentroid = map2.getCenter(); updateComparisonPolygonView(); 
+        } else {
+            lockIconShackle.setAttribute('d', 'M7 11V7a5 5 0 0 1 9.9-1'); 
+            lockedComparisonCentroid = null; updateComparisonPolygonView(); 
+        }
+    });
+
+    document.getElementById('back-to-drawing').addEventListener('click', () => {
+        document.getElementById('map2-view').classList.add('hidden'); document.getElementById('map2-controls').classList.add('hidden');
+        document.getElementById('map1-view').classList.remove('hidden'); document.getElementById('map1-controls').classList.remove('hidden');
+        if (map1) map1.invalidateSize();
+        if(isRulerModeActive && activeRulerMap === map2) { clearRulerDrawing(map2); isRulerModeActive = false; activeRulerMap = null; rulerButtonMap2.classList.remove('active-tool'); }
+    });
+
+    document.getElementById('tile-layer-select2').addEventListener('change', e => createTileLayer(e.target.value, map2));
+    
+    // --- Initial Setup ---
+    showLoadingProgress(10); 
+    initMap1(); // This will also call setMapViewHeight
+</script>
+</body>
+</html>
